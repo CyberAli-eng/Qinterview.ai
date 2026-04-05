@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import Question from "../models/question-model.js";
 import Session from "../models/session-model.js";
 import {
@@ -9,58 +9,67 @@ import {
   questionAnswerPrompt,
 } from "../utils/prompts-util.js";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Initialize the Official Google Generative AI SDK
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENAI_API_KEY);
+
+/**
+ * Robust AI Caller with Retry and Fallback Logic
+ * Handles 503 (High Demand) and 429 (Rate Limit) errors
+ */
+const callAiWithRetry = async (prompt, modelName = "gemini-flash-latest", retries = 3) => {
+  const fallbacks = ["gemini-pro-latest", "gemini-2.0-flash", "gemini-1.5-flash"];
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      const isTransient = error.message.includes("503") || error.message.includes("429") || error.message.includes("high demand");
+      
+      if (isTransient && i < retries - 1) {
+        const delay = Math.pow(2, i) * 1000; // 1s, 2s, 4s backoff
+        console.warn(`AI Busy (Attempt ${i + 1}/${retries}). Retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+
+      // If primary model fails permanently or after retries, try fallbacks
+      if (fallbacks.length > 0) {
+        const nextModel = fallbacks.shift();
+        console.warn(`Switching to fallback model: ${nextModel}`);
+        return callAiWithRetry(prompt, nextModel, 2); 
+      }
+      
+      throw error;
+    }
+  }
+};
 
 // @desc    Generate + SAVE interview questions for a session
-// @route   POST /api/ai/generate-questions
-// @access  Private
 export const generateInterviewQuestions = async (req, res) => {
-  console.log("hi");
+  const { sessionId } = req.body;
+  console.log("Generating questions for session: ", sessionId);
+  
   try {
-    const { sessionId } = req.body; //! read sessionId, not role/experience
+    if (!sessionId) return res.status(400).json({ success: false, message: "sessionId is required" });
 
-    if (!sessionId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "sessionId is required" });
-    }
-
-    //? 1. fetch session → get role, experience, topicsToFocus
     const session = await Session.findById(sessionId);
-    if (!session) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Session not found" });
-    }
-
-    if (session.user.toString() !== req.user._id.toString()) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized" });
-    }
+    if (!session) return res.status(404).json({ success: false, message: "Session not found" });
 
     const { role, experience, topicsToFocus } = session;
-    console.log("session: ", session);
-
-    //? 2. generate via Gemini
     const prompt = questionAnswerPrompt(role, experience, topicsToFocus, 10);
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-    });
-    console.log("response: ", response);
 
-    const parts = response.candidates?.[0]?.content?.parts ?? [];
-    const rawText = parts
-      .filter((p) => !p.thought) // gemini-2.5-flash includes thinking parts; skip them
-      .map((p) => p.text ?? "")
-      .join("");
+    // Call AI with robust retry/fallback logic
+    const rawText = await callAiWithRetry(prompt);
+
+    console.log("AI Generation successful.");
 
     const cleanedText = rawText
       .replace(/^```json\s*/, "")
       .replace(/^```\s*/, "")
       .replace(/```$/, "")
-      .replace(/^json\s*/, "")
       .trim();
 
     let questions;
@@ -69,12 +78,9 @@ export const generateInterviewQuestions = async (req, res) => {
     } catch {
       const jsonMatch = cleanedText.match(/\[[\s\S]*\]/);
       if (jsonMatch) questions = JSON.parse(jsonMatch[0]);
-      else throw new Error("Failed to parse AI response as JSON");
+      else throw new Error("Could not extract valid JSON from AI response");
     }
 
-    if (!Array.isArray(questions)) throw new Error("Response is not an array");
-
-    //! 4. save to DB — was completely missing before
     const saved = await Question.insertMany(
       questions.map((q) => ({
         session: sessionId,
@@ -85,96 +91,55 @@ export const generateInterviewQuestions = async (req, res) => {
       })),
     );
 
-    //! 5. attach IDs to session
     session.questions.push(...saved.map((q) => q._id));
     await session.save();
 
     res.status(201).json({ success: true, data: saved });
   } catch (error) {
-    console.error(error);
+    console.error("AI Error:", error.message);
     res.status(500).json({
       success: false,
-      message: "Failed to generate questions",
+      message: "AI is currently busy. Please try again in top-right retry button.",
       error: error.message,
     });
   }
 };
 
 // @desc    Generate explanation for an interview question
-// @route   POST /api/ai/generate-explanation
-// @access  Private
 export const generateConceptExplanation = async (req, res) => {
   try {
     const { question } = req.body;
-
-    if (!question) {
-      return res.status(400).json({
-        success: false,
-        message: "Question is required",
-      });
-    }
+    if (!question) return res.status(400).json({ success: false, message: "Question is required" });
 
     const prompt = conceptExplainPrompt(question);
+    const rawText = await callAiWithRetry(prompt);
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-lite",
-      contents: prompt,
-    });
-
-    let rawText = response.text;
-
-    // Clean it: Remove backticks, json markers, and any extra formatting
     const cleanedText = rawText
       .replace(/^```json\s*/, "")
       .replace(/^```\s*/, "")
       .replace(/```$/, "")
-      .replace(/^json\s*/, "")
       .trim();
 
-    // Parse the cleaned JSON
     let explanation;
     try {
       explanation = JSON.parse(cleanedText);
-    } catch (parseError) {
-      // If parsing fails, try to extract JSON object from text
+    } catch {
       const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        explanation = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("Failed to parse AI response as JSON");
-      }
+      if (jsonMatch) explanation = JSON.parse(jsonMatch[0]);
+      else throw new Error("Could not extract JSON from explanation");
     }
 
-    // Validate the response structure
-    if (!explanation.title || !explanation.explanation) {
-      throw new Error(
-        "Response missing required fields: title and explanation",
-      );
-    }
-
-    res.status(200).json({
-      success: true,
-      data: explanation,
-    });
+    res.status(200).json({ success: true, data: explanation });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to generate explanation",
-      error: error.message,
-    });
+    console.error("AI Error:", error.message);
+    res.status(500).json({ success: false, message: "AI Explanation Failed", error: error.message });
   }
 };
 
 export const getSessionById = async (req, res) => {
   try {
-    const session = await Session.findById(req.params.id).populate("questions"); // ← this was missing
-
-    if (!session)
-      return res
-        .status(404)
-        .json({ success: false, message: "Session not found" });
-
+    const session = await Session.findById(req.params.id).populate("questions");
+    if (!session) return res.status(404).json({ success: false, message: "Session not found" });
     res.status(200).json({ success: true, session });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -1,26 +1,32 @@
-import { MdRefresh } from "react-icons/md";
-import { TbAlertTriangle } from "react-icons/tb";
+import { FiAlertCircle, FiRefreshCw } from "react-icons/fi";
+import { motion } from "framer-motion";
 
-const ErrorBanner = ({ message, onRetry }) => (
-  <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex items-start justify-between gap-4">
-    <div className="flex items-start gap-3">
-      <TbAlertTriangle className="text-red-500 w-5 h-5 shrink-0 mt-0.5" />
-      <div>
-        <p className="text-red-700 text-sm font-semibold">
-          Failed to load questions
-        </p>
-        <p className="text-red-500 text-xs mt-0.5">{message}</p>
+const ErrorBanner = ({ message, onRetry }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-red-50 border border-red-100 rounded-3xl p-8 flex flex-col items-center text-center shadow-lg shadow-red-100/20"
+    >
+      <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6">
+        <FiAlertCircle className="w-8 h-8 text-red-600" />
       </div>
-    </div>
-    {onRetry && (
-      <button
-        onClick={onRetry}
-        className="shrink-0 inline-flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 border border-red-300 hover:border-red-400 rounded-lg px-3 py-1.5 transition-colors font-medium bg-white"
-      >
-        <MdRefresh className="w-4 h-4" /> Retry
-      </button>
-    )}
-  </div>
-);
+
+      <h3 className="text-xl font-bold text-red-900 mb-2">Something went wrong</h3>
+      <p className="text-red-700 font-medium max-w-sm mb-8 leading-relaxed">
+        {message || "We encountered an error while fetching your questions. Please try again."}
+      </p>
+
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="flex items-center gap-2 px-8 py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold text-lg shadow-xl shadow-red-200 transition-all active:scale-95"
+        >
+          <FiRefreshCw className="w-5 h-5" /> Retry Request
+        </button>
+      )}
+    </motion.div>
+  );
+};
 
 export default ErrorBanner;

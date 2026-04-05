@@ -6,7 +6,6 @@ import Session from "../models/session-model.js";
 // @access  Private
 export const createSession = async (req, res) => {
   try {
-    console.log(1);
     const { role, experience, topicsToFocus, description, questions } =
       req.body;
     const userId = req.user._id; // Assuming you have a middleware setting req.user
