@@ -14,7 +14,9 @@ const app = express();
 
 // Middleware
 app.use(cors({
-    origin: "http://localhost:5173",
+    origin: process.env.CLIENT_URL || "*", // Allow all for initial launch, or specific Vercel URL
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true
 }));
 app.use(express.urlencoded({extended: true})); 
 app.use(express.json());

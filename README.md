@@ -61,8 +61,26 @@ npm start
 cd ../frontend
 npm install
 # Ensure VITE_API_BASE_URL is set in .env
-npm run dev
+npm run build
 ```
+
+---
+
+## 🌐 Deployment Guidelines
+
+### Backend (Render)
+- **Deployment Type**: Web Service
+- **Root Directory**: `backend` (Crucial for monorepo)
+- **Build Command**: `npm install`
+- **Start Command**: `node index.js`
+- **Environment Variables**: `MONGODB_URI`, `JWT_SECRET`, `GOOGLE_GENAI_API_KEY` (Required).
+
+### Frontend (Vercel)
+- **Framework Preset**: `Vite`
+- **Root Directory**: `frontend`
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+- **Environment Variable**: `VITE_API_BASE_URL` (Points to Render URL).
 
 ---
 
