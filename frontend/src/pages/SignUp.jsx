@@ -112,7 +112,7 @@ const SignUp = () => {
 
     setLoading(true);
     try {
-      await axios.post(API_PATHS.AUTH.SIGNUP, {
+      const res = await axios.post(API_PATHS.AUTH.SIGNUP, {
         name: form.name.trim(),
         email: form.email,
         password: form.password,
