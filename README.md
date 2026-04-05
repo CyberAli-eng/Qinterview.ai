@@ -74,4 +74,4 @@ Contributions are welcome! If you have a suggestion that would make this better,
 
 ---
 
-**Designed with ❤️ by [Your Name/Team]**
+**Designed with ❤️ by Ali Khusroo Bin Sabir**
